@@ -1,0 +1,8 @@
+# 把下面这行换成你自己的 DeepSeek API key，然后把这个文件另存为 api-key.txt
+# 申请地址：https://platform.deepseek.com/api_keys
+#
+# 注意：
+#   - 一行明文，不要加引号，不要留空格
+#   - 必须是 sk- 开头的「平台 API key」
+#   - 不要把 api-key.txt 提交到 git（.gitignore 已经排除了它）
+sk-YOUR_DEEPSEEK_API_KEY_HERE

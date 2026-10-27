@@ -1,0 +1,6 @@
+# 第三方中转站（new-api / one-api 系，例如 88api）的 key
+# 把下面这行换成你的 key，然后把这个文件另存为 third-key.txt
+#
+# 可选：不填就只是不显示第三方余额那一行，官方余额功能不受影响。
+# 不要把 third-key.txt 提交到 git（.gitignore 已经排除了它）
+sk-YOUR_THIRD_PARTY_KEY_HERE
