@@ -85,6 +85,27 @@ function Get-ThirdKey {
 }
 $script:ThirdKey = Get-ThirdKey
 
+# ---- 第二个中转站：鸡出没API（xcmapi）
+# 它不吃 new-api 的 /dashboard/billing/*，而是单次 GET {base}/v1/usage，直接给：
+#   { remaining / balance (USD), usage.today.cost, usage.total.cost, unit, planName }
+# 所以余额和「今日费用」都能直接拿，不用像 88api 那样靠差额推算。
+$Third2Name    = '鸡出没'
+$Third2Base    = 'https://xcmapi.org'
+$Third2KeyFile = Join-Path $PSScriptRoot 'third-key-2.txt'
+$Third2Rate    = 1.0
+
+function Get-Third2Key {
+    if ($env:THIRD_API_KEY_2) { return $env:THIRD_API_KEY_2.Trim() }
+    if (Test-Path -LiteralPath $Third2KeyFile) {
+        try {
+            $k = (Get-Content -LiteralPath $Third2KeyFile -Raw -Encoding UTF8).Trim()
+            if ($k) { return $k }
+        } catch { }
+    }
+    return $null
+}
+$script:Third2Key = Get-Third2Key
+
 # ---------------------------------------------------------------- 状态
 $script:State = [ordered]@{ left = -1.0; top = -1.0; showToday = $true; showCd = $true; petHeight = 112.0; animate = $true; online = $true; topmost = $true; third = $true }
 
@@ -305,6 +326,80 @@ function Collect-ThirdQuery {
         $script:ThirdMsg = '联网失败 · ' + $_.Exception.Message
         try { $script:Http3.Dispose() } catch { }
         $script:Http3 = $null                    # 下次重建，避免脏连接
+    }
+}
+
+# ---------------------------------------------------------------- 第二个中转站取数（单次 GET /v1/usage）
+$script:Http4   = $null
+$script:T4Task  = $null
+$script:T4At    = [DateTime]::MinValue
+$script:T4Atok  = [DateTime]::MinValue
+$script:T4Bal   = $null
+$script:T4Today = $null
+$script:T4Total = $null
+$script:T4Msg   = ''
+
+function Start-Third2Query {
+    if (-not $script:State.third) { return }
+    if (-not $script:Third2Key) { return }
+    if ($null -ne $script:T4Task) { return }                                  # 上一次还没回来
+    if (([DateTime]::Now - $script:T4Atok).TotalSeconds -lt $OnlineSecs) { return }
+    try {
+        if ($null -eq $script:Http4) {
+            $script:Http4 = New-Object System.Net.Http.HttpClient
+            $script:Http4.Timeout = [TimeSpan]::FromSeconds(25)
+            $script:Http4.DefaultRequestHeaders.Authorization =
+                New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $script:Third2Key)
+        }
+        $script:T4At   = [DateTime]::Now
+        $script:T4Task = $script:Http4.GetAsync("$Third2Base/v1/usage")
+    } catch {
+        $script:T4Task = $null
+        $script:T4Msg  = '发起失败 · ' + $_.Exception.Message
+    }
+}
+
+function Collect-Third2Query {
+    if ($null -eq $script:T4Task) { return }
+    if (-not $script:T4Task.IsCompleted) { return }
+    $t = $script:T4Task
+    $script:T4Task = $null
+    try {
+        $resp = $t.Result
+        $body = $resp.Content.ReadAsStringAsync().Result
+        $code = [int]$resp.StatusCode
+        if ($code -ne 200) {
+            $script:T4Msg = switch ($code) {
+                401 { 'API key 无效' }
+                402 { '额度不足' }
+                429 { '请求太频繁' }
+                default { "接口返回 $code" }
+            }
+            $script:T4Bal = $null
+            return
+        }
+        $j = $body | ConvertFrom-Json
+        $val = $null
+        if ($null -ne $j.remaining) { $val = [double]$j.remaining }
+        elseif ($null -ne $j.balance) { $val = [double]$j.balance }
+        if ($null -eq $val) { $script:T4Msg = '返回里没有余额字段'; $script:T4Bal = $null; return }
+        $script:T4Bal = $val * [double]$Third2Rate
+        $script:T4Today = $null
+        $script:T4Total = $null
+        if ($null -ne $j.usage -and $null -ne $j.usage.today) {
+            if ($null -ne $j.usage.today.actual_cost) { $script:T4Today = [double]$j.usage.today.actual_cost }
+            elseif ($null -ne $j.usage.today.cost)   { $script:T4Today = [double]$j.usage.today.cost }
+        }
+        if ($null -ne $j.usage -and $null -ne $j.usage.total) {
+            if ($null -ne $j.usage.total.actual_cost) { $script:T4Total = [double]$j.usage.total.actual_cost }
+            elseif ($null -ne $j.usage.total.cost)   { $script:T4Total = [double]$j.usage.total.cost }
+        }
+        $script:T4Atok = [DateTime]::Now
+        $script:T4Msg  = ''
+    } catch {
+        $script:T4Msg = '联网失败 · ' + $_.Exception.Message
+        try { $script:Http4.Dispose() } catch { }
+        $script:Http4 = $null                    # 下次重建，避免脏连接
     }
 }
 
@@ -577,6 +672,15 @@ $lblThird.Foreground = $clrDim
 $lblThird.Visibility = 'Collapsed'
 $lblThird.FontFamily = $lblBal.FontFamily
 
+# 第二个中转站（鸡出没）余额行：同样没配 key / 关掉时整行折叠
+$lblThird2 = [System.Windows.Controls.TextBlock]::new()
+$lblThird2.Text = ''
+$lblThird2.FontSize = 12.5; $lblThird2.FontWeight = 'SemiBold'
+$lblThird2.Margin = [System.Windows.Thickness]::new(1, 1, 0, 0)
+$lblThird2.Foreground = $clrDim
+$lblThird2.Visibility = 'Collapsed'
+$lblThird2.FontFamily = $lblBal.FontFamily
+
 $lblToday = [System.Windows.Controls.TextBlock]::new()
 $lblToday.Text = '读取中…'
 $lblToday.FontSize = 11.5; $lblToday.Margin = [System.Windows.Thickness]::new(1, 2, 0, 0)
@@ -599,6 +703,7 @@ $texts = [System.Windows.Controls.StackPanel]::new()
 $texts.VerticalAlignment = 'Center'
 [void]$texts.Children.Add($lblBal)
 [void]$texts.Children.Add($lblThird)
+[void]$texts.Children.Add($lblThird2)
 [void]$texts.Children.Add($lblToday)
 [void]$texts.Children.Add($lblCd)
 [void]$texts.Children.Add($lblAge)
@@ -663,6 +768,8 @@ function Update-Ui {
     Collect-OnlineQuery
     Start-ThirdQuery
     Collect-ThirdQuery
+    Start-Third2Query
+    Collect-Third2Query
 
     $u = Get-Usage
 
@@ -715,6 +822,32 @@ function Update-Ui {
     } else {
         $lblThird.Visibility = 'Collapsed'
         $lblThird.ToolTip = $null
+    }
+
+    # ---- 第二个中转站（鸡出没）：直接读 /v1/usage 的 remaining
+    if ($script:Third2Key -and $script:State.third) {
+        $lblThird2.Visibility = 'Visible'
+        if ($null -ne $script:T4Bal) {
+            $lblThird2.Text = '{0} ¥ {1:N2}' -f $Third2Name, [double]$script:T4Bal
+            if ([double]$script:T4Bal -lt 3) { $lblThird2.Foreground = (C 255 255 196 77) }
+            else                             { $lblThird2.Foreground = $clrDim }
+            $tip4 = '{0} 账户余额（单位 USD）' -f $Third2Name
+            if ($null -ne $script:T4Today) { $tip4 = $tip4 + ("`n今日费用 {0:N2}" -f [double]$script:T4Today) }
+            if ($null -ne $script:T4Total) { $tip4 = $tip4 + ("`n累计费用 {0:N2}" -f [double]$script:T4Total) }
+            $sec4 = ([DateTime]::Now - $script:T4Atok).TotalSeconds
+            if     ($sec4 -lt 90)   { $tip4 = $tip4 + ("`n{0:N0} 秒前取的数" -f $sec4) }
+            elseif ($sec4 -lt 3600) { $tip4 = $tip4 + ("`n{0:N0} 分钟前取的数" -f ($sec4 / 60)) }
+            else                    { $tip4 = $tip4 + ("`n{0:N0} 小时前取的数" -f ($sec4 / 3600)) }
+            $lblThird2.ToolTip = $tip4
+        } else {
+            $lblThird2.Text = '{0} ¥ --' -f $Third2Name
+            $lblThird2.Foreground = $clrDimmer
+            if ($script:T4Msg) { $lblThird2.ToolTip = $script:T4Msg }
+            else { $lblThird2.ToolTip = "还没取到 · 在 third-key-2.txt 里填 $Third2Name 的 sk- key" }
+        }
+    } else {
+        $lblThird2.Visibility = 'Collapsed'
+        $lblThird2.ToolTip = $null
     }
 
     # ---- 今日已用：联网时按余额变化自己算；否则用本地账本
@@ -824,31 +957,31 @@ $miOnline.Add_Click({
     Save-State; Update-Ui
 })
 
-# 第三方源（88api 等）：开关 + 打开 key 文件
+# 第三方源（88api / 鸡出没 等）：总开关 + 打开 key 文件夹
 $miThird = [System.Windows.Controls.MenuItem]::new()
 $miThird.IsCheckable = $true; $miThird.IsChecked = [bool]$script:State.third
-if ($script:ThirdKey) {
-    $miThird.Header = '显示第三方余额（{0}，每 60 秒）' -f $ThirdName
+$cfgCount = 0
+if ($script:ThirdKey)  { $cfgCount++ }
+if ($script:Third2Key) { $cfgCount++ }
+if ($cfgCount -gt 0) {
+    $miThird.Header = '显示中转站余额（已配 {0} 个，每 60 秒）' -f $cfgCount
 } else {
-    $miThird.Header = '显示第三方余额（未配置 third-key.txt）'
+    $miThird.Header = '显示中转站余额（未配置 key）'
 }
 $miThird.Add_Click({
     $script:State.third = [bool]$miThird.IsChecked
-    if ($script:State.third) { $script:T3At = [DateTime]::MinValue }
-    else { $script:ThirdBal = $null; $script:ThirdMsg = '' }
+    if ($script:State.third) {
+        $script:T3At = [DateTime]::MinValue; $script:T4Atok = [DateTime]::MinValue
+    } else {
+        $script:ThirdBal = $null; $script:ThirdMsg = ''
+        $script:T4Bal = $null; $script:T4Msg = ''
+    }
     Save-State; Update-Ui
 })
 
 $miThirdKey = [System.Windows.Controls.MenuItem]::new()
-$miThirdKey.Header = '打开第三方 key 文件（third-key.txt）'
-$miThirdKey.Add_Click({
-    if (Test-Path -LiteralPath $ThirdKeyFile) {
-        Start-Process notepad.exe $ThirdKeyFile
-    } else {
-        [void][System.Windows.MessageBox]::Show("请在该目录新建 third-key.txt，把 $ThirdName 的 sk- key 粘进去（文件里只放 key）：`n$PSScriptRoot", '第三方源')
-        Start-Process explorer.exe $PSScriptRoot
-    }
-})
+$miThirdKey.Header = '打开中转站 key 文件夹（third-key*.txt）'
+$miThirdKey.Add_Click({ Start-Process explorer.exe $PSScriptRoot })
 
 $miAnim = [System.Windows.Controls.MenuItem]::new(); $miAnim.Header = '待机动画与互动（晃动 / 弹跳）'
 $miAnim.IsCheckable = $true; $miAnim.IsChecked = [bool]$script:State.animate

@@ -1,0 +1,9 @@
+# 鸡出没API（xcmapi）的 key，填到下面这一行后把这个文件另存为 third-key-2.txt
+#
+# 这个站点不是 new-api 系，余额接口是单次：
+#   GET https://xcmapi.org/v1/usage   →  { remaining, usage.today.cost, unit, ... }
+# 所以不需要 base 里带 /v1，脚本会自己拼。
+#
+# 可选：不填就只是不显示这一行，其他功能不受影响。
+# 不要把 third-key-2.txt 提交到 git。
+sk-YOUR_XCMAPI_KEY_HERE

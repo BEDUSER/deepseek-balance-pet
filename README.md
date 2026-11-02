@@ -12,7 +12,7 @@
 3. 双击 `start-silent.vbs` 启动（无黑框）
 4. 想放桌面：右键 `start-silent.vbs` → 发送到 → 桌面快捷方式，再把图标换成 `pet.ico`
 
-> 仓库里**不包含**任何真实密钥。`api-key.txt` / `third-key.txt` 已被 `.gitignore` 排除。
+> 仓库里**不包含**任何真实密钥。`api-key*.txt` / `third-key*.txt` 已被 `.gitignore` 排除。
 
 ## 数据从哪来
 
@@ -138,6 +138,8 @@ Unblock-File .\balance-window.ps1
 | `balance-window.ps1` | 主程序（PowerShell 5.1 + WPF，零依赖） |
 | `start-silent.vbs` | 静默启动器 |
 | **`api-key.txt`** | **可选。你的 DeepSeek API key（一行明文）→ 开启联网查余额** |
+| **`third-key.txt`** | **可选。new-api/one-api 系中转站（如 88api）的 key** |
+| **`third-key-2.txt`** | **可选。鸡出没API（xcmapi）的 key** |
 | **`pet.png`** | **形象图**（可选，见下） |
 | `.balance-window.json` | 位置 / 开关 / 形象大小（存在脚本同目录） |
 | `.balance-online.json` | 联网模式自己算的今日已用（存在脚本同目录） |
@@ -189,7 +191,6 @@ Unblock-File .\balance-window.ps1
 
 两个周期故意不成整数比，叠起来不会看出循环。
 只用 `RenderTransform`（不参与布局），所以**窗口尺寸不会跟着抖**。
-
 **互动**（有刺激才动）：
 
 | 触发 | 反应 | 时长 |
@@ -204,6 +205,23 @@ Unblock-File .\balance-window.ps1
 右键 → **待机动画与互动（晃动 / 弹跳）** 一键全关（待机 + 三个互动都听它的）。
 觉得幅度不合适就改 `Start-Sway` 里的 `0.97` / `1.012` / `±1.0`，
 或 `Invoke-Bounce` / `Invoke-Perk` / `Invoke-Shake` 里的关键帧。
+
+## 中转站余额
+
+除了官方 DeepSeek，还可以同时显示**两个中转站**的余额。每个源都是一行，没配 key 就自动折叠不占位置。
+
+| 源 | key 文件 | 取数方式 |
+|---|---|---|
+| new-api / one-api 系（如 88api） | `third-key.txt` | 两步：`/dashboard/billing/subscription` 拿总额度，`/dashboard/billing/usage` 拿已用，余额 = 总额度 − 已用/100 |
+| 鸡出没API（xcmapi） | `third-key-2.txt` | 单次 `GET {base}/v1/usage`，直接返回 `remaining`（USD）与 `usage.today.cost` |
+
+两者都从下面的优先级取 key：进程环境变量（`THIRD_API_KEY` / `THIRD_API_KEY_2`）→ 小窗目录的对应文件。
+
+鼠标停在那一行上能看到取数时间；鸡出没还会额外显示当今日费用和累计费用。
+
+想再加一个源：把 `balance-window.ps1` 里 `$Third2Base` 附近那段复制一份，改 `name` / `base` / `keyfile`
+和返回字段名即可。若站点是 new-api 系（有 `/dashboard/billing/*`）就直接照搬 `Start-ThirdQuery` 那套；
+若只是一个 `{余额, 用量}` 的 JSON，照搬 `Start-Third2Query` 那套更简单。
 
 ## 许可证
 
@@ -220,8 +238,8 @@ Unblock-File .\balance-window.ps1
 
 ## 安全提示
 
-- `api-key.txt` 是**明文**，只放本机，不要提交、不要截图分享
-- `.gitignore` 已排除 `api-key.txt` / `third-key.txt` / `.env*`
+- `api-key.txt` / `third-key*.txt` 是**明文**，只放本机，不要提交、不要截图分享
+- `.gitignore` 已排除 `api-key*.txt` / `third-key*.txt` / `.env*`
 - 如果误把 key 提交过，请立刻到平台**吊销并重新生成** —— git 历史里删不干净
 
 ## 已知限制
